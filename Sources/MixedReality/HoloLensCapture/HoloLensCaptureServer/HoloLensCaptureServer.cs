@@ -285,6 +285,10 @@ namespace HoloLensCaptureServer
                 }
             }
 
+            // Set up an external microphone
+            var microphone = new AudioCapture(captureServerPipeline, WaveFormat.Create16kHz1Channel16BitPcm());
+            microphone.Write("ExternalMicrophone", captureServerStore);
+
             // Send a server heartbeat
             var serverHeartbeat = Generators.Sequence(
                 captureServerPipeline,
