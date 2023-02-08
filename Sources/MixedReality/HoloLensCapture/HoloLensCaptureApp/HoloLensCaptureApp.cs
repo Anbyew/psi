@@ -710,6 +710,23 @@ namespace HoloLensCaptureApp
                                             throw new Exception($"Connection received from unexpected version of HoloLensCaptureServer (expected {Version}, actual {process.Version}).");
                                         }
 
+                                        foreach (var endpoint in process.Endpoints)
+                                        {
+                                            if (endpoint is Rendezvous.TcpSourceEndpoint tcpEndpoint)
+                                            {
+                                                foreach (var stream in tcpEndpoint.Streams)
+                                                {
+                                                    if (stream.StreamName == $"ExternalMicrophone")
+                                                    {
+                                                        // note: using captureServerAddress -- ignoring tcpEndpoint.Host (0.0.0.0)
+                                                        var externalMicrophone = new TcpSource<AudioBuffer>(pipeline, captureServerAddress, tcpEndpoint.Port, Serializers.AudioBufferFormat());
+                                                        var externalMicrophoneSpatialSound = new SpatialSound(pipeline, default);
+                                                        externalMicrophone.PipeTo(externalMicrophoneSpatialSound);
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         captureServerProcess = process;
                                     }
                                 };
