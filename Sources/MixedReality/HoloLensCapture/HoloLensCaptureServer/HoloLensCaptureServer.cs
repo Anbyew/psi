@@ -285,10 +285,6 @@ namespace HoloLensCaptureServer
                 }
             }
 
-            // Set up an external microphone
-            var microphone = new AudioCapture(captureServerPipeline, WaveFormat.Create16kHz1Channel16BitPcm());
-            microphone.Write("ExternalMicrophone", captureServerStore);
-
             // Send a server heartbeat
             var serverHeartbeat = Generators.Sequence(
                 captureServerPipeline,
@@ -323,10 +319,18 @@ namespace HoloLensCaptureServer
             serverHeartbeat.Write("ServerHeartbeat", captureServerStore);
             var heartbeatTcpSource = new TcpWriter<(float, float)>(captureServerPipeline, 16000, Serializers.HeartbeatFormat());
             serverHeartbeat.PipeTo(heartbeatTcpSource);
+
+            // Set up an external microphone
+            var microphone = new AudioCapture(captureServerPipeline, WaveFormat.CreateIeeeFloat(48000, 1));
+            microphone.Write("ExternalMicrophone", captureServerStore);
+            var microphoneTcpSource = new TcpWriter<AudioBuffer>(captureServerPipeline, 16001, Serializers.AudioBufferFormat());
+            microphone.PipeTo(microphoneTcpSource);
+
+            // Add the Rendezvous process
             RendezvousServer.Rendezvous.TryAddProcess(
                 new Rendezvous.Process(
                     nameof(HoloLensCaptureServer),
-                    new[] { heartbeatTcpSource.ToRendezvousEndpoint("0.0.0.0", "ServerHeartbeat") }, // dummy host name, ignored by app
+                    new[] { heartbeatTcpSource.ToRendezvousEndpoint("0.0.0.0", "ServerHeartbeat"), microphoneTcpSource.ToRendezvousEndpoint("0.0.0.0", "ExternalMicrophone") }, // dummy host name, ignored by app
                     Version));
 
             // Report statistics to console
