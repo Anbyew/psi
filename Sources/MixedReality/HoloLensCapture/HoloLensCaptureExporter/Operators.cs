@@ -14,12 +14,14 @@ namespace HoloLensCaptureExporter
     using Microsoft.Psi;
     using Microsoft.Psi.Audio;
     using Microsoft.Psi.Calibration;
+    using Microsoft.Psi.CognitiveServices.Speech;
     using Microsoft.Psi.Data;
     using Microsoft.Psi.Imaging;
     using Microsoft.Psi.MixedReality;
     using Microsoft.Psi.MixedReality.OpenXR;
     using Microsoft.Psi.MixedReality.WinRT;
     using Microsoft.Psi.Spatial.Euclidean;
+    using Microsoft.Psi.Speech;
     using OpenXRHand = Microsoft.Psi.MixedReality.OpenXR.Hand;
     using OpenXRHandsSensor = Microsoft.Psi.MixedReality.OpenXR.HandsSensor;
     using StereoKitHand = Microsoft.Psi.MixedReality.StereoKit.Hand;
@@ -32,6 +34,8 @@ namespace HoloLensCaptureExporter
     internal static class Operators
     {
         private static readonly string NaNString = double.NaN.ToText();
+        private static readonly string AzureSpeechKey = Environment.GetEnvironmentVariable("AZURE_SPEECH_KEY");
+        private static readonly string AzureSpeechRegion = Environment.GetEnvironmentVariable("AZURE_SPEECH_REGION");
 
         /// <summary>
         /// Opens the specified stream for reading and (or returns null if nonexistent).
@@ -491,6 +495,45 @@ namespace HoloLensCaptureExporter
                             timingFile.WriteLine($"{bufferCounter++}\t{envelope.OriginatingTime.ToText()}");
                         }
                     });
+
+            // export transcriptions
+            var resampledAudio = new AudioResampler(
+                source.Out.Pipeline,
+                new AudioResamplerConfiguration()
+                {
+                    OutputFormat = WaveFormat.Create16kHz1Channel16BitPcm(),
+                });
+
+            source.PipeTo(resampledAudio);
+            var vad = new SystemVoiceActivityDetector(source.Out.Pipeline);
+            resampledAudio.PipeTo(vad);
+            var annotatedAudio = resampledAudio.Join(vad);
+
+            var recognizer = new AzureSpeechRecognizer(source.Out.Pipeline, new AzureSpeechRecognizerConfiguration()
+                {
+                    Region = AzureSpeechRegion,
+                    SubscriptionKey = AzureSpeechKey,
+                });
+            annotatedAudio.PipeTo(recognizer);
+            var transcriptionFilePath = DataExporter.EnsurePathExists(Path.Combine(outputPath, name, $"{name}_transcription.txt"));
+            var transcriptionFile = File.CreateText(transcriptionFilePath);
+            streamWritersToClose.Add(transcriptionFile);
+
+            var finalResults = recognizer.Out.Where(result => result.IsFinal).Where(result => !string.IsNullOrWhiteSpace(result.Text));
+            finalResults
+               .Do(
+                   (result, envelope) =>
+                   {
+                       var row = new StringBuilder();
+
+                       // the originating time of the transcription envelope is when speech ended.
+                       var speechEndTime = envelope.OriginatingTime - source.Out.Pipeline.StartTime;
+                       var speechStartTime = speechEndTime - result.Duration;
+                       row.Append($"{speechStartTime.Value.TotalSeconds}\t");
+                       row.Append($"{result.Duration.Value.TotalSeconds}\t");
+                       row.Append($"{result.Text}");
+                       transcriptionFile.WriteLine(row.ToString());
+                   });
         }
 
         /// <summary>

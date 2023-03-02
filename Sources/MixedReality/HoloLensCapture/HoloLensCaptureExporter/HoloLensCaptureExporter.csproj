@@ -39,9 +39,11 @@
     <ProjectReference Include="..\..\..\Calibration\Microsoft.Psi.Calibration\Microsoft.Psi.Calibration.csproj" />
     <ProjectReference Include="..\..\..\Imaging\Microsoft.Psi.Imaging.Windows\Microsoft.Psi.Imaging.Windows.csproj" />
     <ProjectReference Include="..\..\..\Imaging\Microsoft.Psi.Imaging\Microsoft.Psi.Imaging.csproj" />
+    <ProjectReference Include="..\..\..\Integrations\CognitiveServices\Microsoft.Psi.CognitiveServices.Speech\Microsoft.Psi.CognitiveServices.Speech.csproj" />
     <ProjectReference Include="..\..\..\Media\Microsoft.Psi.Media.Windows.x64\Microsoft.Psi.Media.Windows.x64.csproj" />
     <ProjectReference Include="..\..\..\MixedReality\Microsoft.Psi.MixedReality\Microsoft.Psi.MixedReality.csproj" />
     <ProjectReference Include="..\..\..\Runtime\Microsoft.Psi\Microsoft.Psi.csproj" />
+    <ProjectReference Include="..\..\..\Speech\Microsoft.Psi.Speech.Windows\Microsoft.Psi.Speech.Windows.csproj" />
   </ItemGroup>
 
 </Project>

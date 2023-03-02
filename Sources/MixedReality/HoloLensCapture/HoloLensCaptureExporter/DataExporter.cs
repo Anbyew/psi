@@ -51,6 +51,7 @@ namespace HoloLensCaptureExporter
             var magnetometer = store.OpenStreamOrDefault<(Vector3D, DateTime)[]>("Magnetometer");
             var head = store.OpenStreamOrDefault<CoordinateSystem>("Head");
             var audio = store.OpenStreamOrDefault<AudioBuffer>(AudioStreamName);
+            var externalMicrophone = store.OpenStreamOrDefault<AudioBuffer>("ExternalMicrophone");
             var videoEncodedImageCameraView = store.OpenStreamOrDefault<EncodedImageCameraView>(VideoEncodedStreamName);
             var videoImageCameraView = store.OpenStreamOrDefault<ImageCameraView>(VideoStreamName);
             var previewEncodedImageCameraView = store.OpenStreamOrDefault<EncodedImageCameraView>("PreviewEncodedImageCameraView");
@@ -223,6 +224,9 @@ namespace HoloLensCaptureExporter
 
             // Export audio
             audio?.Export("Audio", exportCommand.OutputPath, streamWritersToClose);
+
+            // Export external microphone
+            externalMicrophone?.Export("ExternalMicrophone", exportCommand.OutputPath, streamWritersToClose);
 
             // Export scene understanding
             sceneUnderstanding?.Export("SceneUnderstanding", exportCommand.OutputPath, streamWritersToClose);
