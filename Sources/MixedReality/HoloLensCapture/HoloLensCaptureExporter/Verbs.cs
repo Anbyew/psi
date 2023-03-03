@@ -16,6 +16,12 @@ namespace HoloLensCaptureExporter
         internal class ExportCommand
         {
             /// <summary>
+            /// Gets or sets a value indicating whether to export the audio data only.
+            /// </summary>
+            [Option('a', "audio-only", Required = false, HelpText = "Whether to export the audio data only (default: false).")]
+            public bool AudioOnly { get; set; } = false;
+
+            /// <summary>
             /// Gets or sets the file path of the input Psi data store.
             /// </summary>
             [Option('n', "name", Required = false, HelpText = "Name of the input Psi data store (default: HoloLensCapture).")]

@@ -339,6 +339,50 @@ namespace HoloLensCaptureExporter
         }
 
         /// <summary>
+        /// Exports only the audio data.
+        /// </summary>
+        /// <param name="exportCommand">The export command.</param>
+        /// <returns>An error code or 0 if success.</returns>
+        public static int RunAudioOnly(Verbs.ExportCommand exportCommand)
+        {
+            // Create a pipeline
+            using var p = Pipeline.Create(deliveryPolicy: DeliveryPolicy.Throttle);
+
+            // Open the psi store for reading
+            var store = PsiStore.Open(p, exportCommand.StoreName, exportCommand.StorePath);
+
+            // Get references to the various streams. If a stream is not present in the store,
+            // the reference will be null.
+            var audio = store.OpenStreamOrDefault<AudioBuffer>(AudioStreamName);
+            var externalMicrophone = store.OpenStreamOrDefault<AudioBuffer>("ExternalMicrophone");
+
+            // Construct a list of stream writers to export data with (these will be closed once
+            // the export pipeline is completed)
+            var streamWritersToClose = new List<StreamWriter>();
+
+            // Export audio
+            audio?.Export("Audio", exportCommand.OutputPath, streamWritersToClose);
+
+            // Export external microphone
+            externalMicrophone?.Export("ExternalMicrophone", exportCommand.OutputPath, streamWritersToClose);
+
+            Console.WriteLine($"Exporting {exportCommand.StoreName} (audio only) to {exportCommand.OutputPath}");
+            var startTime = DateTime.Now;
+            p.RunAsync(ReplayDescriptor.ReplayAll, progress: new Progress<double>(p => Console.Write($"Progress: {p:P} Time elapsed: {DateTime.Now - startTime}\r")));
+            p.WaitAll();
+
+            foreach (var sw in streamWritersToClose)
+            {
+                sw.Close();
+            }
+
+            Console.WriteLine();
+            Console.WriteLine($"Done in {DateTime.Now - startTime}.");
+
+            return 0;
+        }
+
+        /// <summary>
         /// Ensures that a specified path exists.
         /// </summary>
         /// <param name="path">The path to ensure the existence of.</param>

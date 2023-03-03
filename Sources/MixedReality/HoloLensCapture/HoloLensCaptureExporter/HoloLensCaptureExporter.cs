@@ -24,7 +24,17 @@ namespace HoloLensCaptureExporter
             {
                 return Parser.Default.ParseArguments<Verbs.ExportCommand>(args)
                     .MapResult(
-                        (Verbs.ExportCommand command) => DataExporter.Run(command),
+                        (Verbs.ExportCommand command) =>
+                        {
+                            if (command.AudioOnly)
+                            {
+                                return DataExporter.RunAudioOnly(command);
+                            }
+                            else
+                            {
+                                return DataExporter.Run(command);
+                            }
+                        },
                         DisplayParseErrors);
             }
             catch (Exception ex)
