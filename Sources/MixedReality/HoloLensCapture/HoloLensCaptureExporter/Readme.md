@@ -17,6 +17,7 @@ The following options are available:
 | `p`    | `path`   | Path to the input Psi data store.                                     |
 | `o`    | `output` | Output path to export data to.                                        |
 | `n`    | `name`   | Optional name of the input Psi data store (default: HoloLensCapture). |
+| `a`    | `audio-only`   | **PTG Addon** Whether to export the audio data only (default: false). |
 
 ## Output Formats
 
