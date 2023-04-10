@@ -18,6 +18,9 @@ The following options are available:
 | `o`    | `output` | Output path to export data to.                                        |
 | `n`    | `name`   | Optional name of the input Psi data store (default: HoloLensCapture). |
 | `a`    | `audio-only`   | **PTG Addon** Whether to export the audio data only (default: false). |
+| `s`    | `step-detection`   | **PTG Addon** Whether to export step detection segments (default: false). |
+| `t`    | `text`   | **PTG Addon** Whether to export ASR text (default: false). |
+
 
 ## Output Formats
 
