@@ -12,15 +12,16 @@ This will open the store specified by `-p`, find and convert streams within, and
 
 The following options are available:
 
-| Option | Abbr     | Description                                                           |
-| ------ | -------- | --------------------------------------------------------------------- |
-| `p`    | `path`   | Path to the input Psi data store.                                     |
-| `o`    | `output` | Output path to export data to.                                        |
-| `n`    | `name`   | Optional name of the input Psi data store (default: HoloLensCapture). |
-| `a`    | `audio-only`   | **PTG Addon** Whether to export the audio data only (default: false). |
+| Option | Abbr               | Description                                                               |
+| ------ | ------------------ | ------------------------------------------------------------------------- |
+| `p`    | `path`             | Path to the input Psi data store.                                         |
+| `o`    | `output`           | Output path to export data to.                                            |
+| `n`    | `name`             | Optional name of the input Psi data store (default: HoloLensCapture).     |
+| `a`    | `audio-only`       | **PTG Addon** Whether to export the audio data only (default: false).     |
 | `s`    | `step-detection`   | **PTG Addon** Whether to export step detection segments (default: false). |
-| `t`    | `text`   | **PTG Addon** Whether to export ASR text (default: false). |
+| `t`    | `text-asr`         | **PTG Addon** Whether to export ASR text annotations (default: false).    |
 
+You can also specify the store name in a similar manner of `-n` for the Step Detection Store, and User's ASR Annotation Store, and Instructor's ASR Annotation Store with `--step-detection-name`, `--text-asr-name-user`, and `--text-asr-name-instructor` respectively.
 
 ## Output Formats
 

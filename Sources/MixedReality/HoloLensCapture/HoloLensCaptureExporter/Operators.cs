@@ -16,12 +16,14 @@ namespace HoloLensCaptureExporter
     using Microsoft.Psi.Calibration;
     using Microsoft.Psi.CognitiveServices.Speech;
     using Microsoft.Psi.Data;
+    using Microsoft.Psi.Data.Annotations;
     using Microsoft.Psi.Imaging;
     using Microsoft.Psi.MixedReality;
     using Microsoft.Psi.MixedReality.OpenXR;
     using Microsoft.Psi.MixedReality.WinRT;
     using Microsoft.Psi.Spatial.Euclidean;
     using Microsoft.Psi.Speech;
+    using SharpDX.Direct3D9;
     using OpenXRHand = Microsoft.Psi.MixedReality.OpenXR.Hand;
     using OpenXRHandsSensor = Microsoft.Psi.MixedReality.OpenXR.HandsSensor;
     using StereoKitHand = Microsoft.Psi.MixedReality.StereoKit.Hand;
@@ -497,6 +499,12 @@ namespace HoloLensCaptureExporter
                     });
 
             // export transcriptions
+            var a = 1;
+            if (a == 1)
+            {
+                return;
+            }
+
             var resampledAudio = new AudioResampler(
                 source.Out.Pipeline,
                 new AudioResamplerConfiguration()
@@ -658,6 +666,40 @@ namespace HoloLensCaptureExporter
             ExportScene(source.Select(s => s.Unknown), nameof(SceneObjectCollection.Unknown));
             ExportScene(source.Select(s => s.Wall), nameof(SceneObjectCollection.Wall));
             ExportScene(source.Select(s => s.World), nameof(SceneObjectCollection.World));
+        }
+
+        /// <summary>
+        /// Exports a stream of time annotations (for step detection or user/instructor ASR annotations).
+        /// </summary>
+        /// <param name="source">The source stream of time annotations.</param>
+        /// <param name="directory">The directory in which to persist.</param>
+        /// <param name="name">The name for the source stream.</param>
+        /// <param name="outputPath">The output path.</param>
+        /// <param name="streamWritersToClose">The collection of stream writers to be closed.</param>
+        internal static void Export(this IProducer<TimeIntervalAnnotationSet> source, string directory, string name, string outputPath, List<StreamWriter> streamWritersToClose)
+        {
+            var filePath = DataExporter.EnsurePathExists(Path.Combine(outputPath, directory, $"{name}.txt"));
+            var file = File.CreateText(filePath);
+            streamWritersToClose.Add(file);
+            source
+                .Do(
+                    (map, envelope) =>
+                    {
+                        var result = new StringBuilder();
+                        result.Append($"{envelope.OriginatingTime.ToText()}\t");
+                        var track = map.Tracks.FirstOrDefault();
+
+                        result.Append($"{map[track].Interval.Left.ToText()}\t");
+                        result.Append($"{map[track].Interval.Right.ToText()}\t");
+
+                        foreach (var pair in map[track].AttributeValues)
+                        {
+                            // result.Append($"{pair.Key}\t");
+                            result.Append($"{pair.Value.ValueAsString}\t");
+                        }
+
+                        file.WriteLine(result.ToString().TrimEnd('\t'));
+                    });
         }
     }
 }

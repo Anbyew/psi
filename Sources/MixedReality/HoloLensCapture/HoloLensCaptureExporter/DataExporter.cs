@@ -11,6 +11,8 @@ namespace HoloLensCaptureExporter
     using MathNet.Spatial.Euclidean;
     using Microsoft.Psi;
     using Microsoft.Psi.Audio;
+    using Microsoft.Psi.Data;
+    using Microsoft.Psi.Data.Annotations;
     using Microsoft.Psi.Imaging;
     using Microsoft.Psi.Media;
     using Microsoft.Psi.MixedReality;
@@ -42,7 +44,22 @@ namespace HoloLensCaptureExporter
             using var p = Pipeline.Create(deliveryPolicy: DeliveryPolicy.Throttle);
 
             // Open the psi store for reading
-            var store = PsiStore.Open(p, exportCommand.StoreName, exportCommand.StorePath);
+            PsiImporter store = PsiStore.Open(p, exportCommand.StoreName, exportCommand.StorePath);
+
+            // Open the "anno" psi store for reading annotations and step segments
+            PsiImporter stepStore = null;
+            PsiImporter asrUserStore = null;
+            PsiImporter asrInstructorStore = null;
+            if (exportCommand.StepDetection)
+            {
+                stepStore = PsiStore.Open(p, exportCommand.StoreNameStepDetection, exportCommand.StorePath);
+            }
+
+            if (exportCommand.TextASR)
+            {
+                asrUserStore = PsiStore.Open(p, exportCommand.StoreNameTextASRUser, exportCommand.StorePath);
+                asrInstructorStore = PsiStore.Open(p, exportCommand.StoreNameTextASRInstructor, exportCommand.StorePath);
+            }
 
             // Get references to the various streams. If a stream is not present in the store,
             // the reference will be null.
@@ -81,6 +98,11 @@ namespace HoloLensCaptureExporter
             var rightRightImageCameraView = store.OpenStreamOrDefault<ImageCameraView>("RightRightImageCameraView");
             var rightRightCalibrationMap = store.OpenStreamOrDefault<CalibrationPointsMap>("RightRightCalibrationMap");
             var sceneUnderstanding = store.OpenStreamOrDefault<SceneObjectCollection>("SceneUnderstanding");
+
+            // Optional streams for annotations
+            var stepDetection = exportCommand.StepDetection ? stepStore.OpenStreamOrDefault<TimeIntervalAnnotationSet>(exportCommand.StoreNameStepDetection) : null;
+            var userASR = exportCommand.TextASR ? asrUserStore.OpenStreamOrDefault<TimeIntervalAnnotationSet>(exportCommand.StoreNameTextASRUser) : null;
+            var instructorASR = exportCommand.TextASR ? asrInstructorStore.OpenStreamOrDefault<TimeIntervalAnnotationSet>(exportCommand.StoreNameTextASRInstructor) : null;
 
             // Verify expected stream combinations
             void VerifyMutualExclusivity(dynamic a, dynamic b, string name)
@@ -228,11 +250,23 @@ namespace HoloLensCaptureExporter
             // Export external microphone
             externalMicrophone?.Export("ExternalMicrophone", exportCommand.OutputPath, streamWritersToClose);
 
+            // Export step detection
+            if (exportCommand.StepDetection)
+            {
+                stepDetection?.Export("StepDetection", "StepDetection", exportCommand.OutputPath, streamWritersToClose);
+            }
+
+            if (exportCommand.TextASR)
+            {
+                userASR?.Export("TextASR", "UserAnnotations", exportCommand.OutputPath, streamWritersToClose);
+                instructorASR?.Export("TextASR", "InstructorAnnotations", exportCommand.OutputPath, streamWritersToClose);
+            }
+
             // Export scene understanding
             sceneUnderstanding?.Export("SceneUnderstanding", exportCommand.OutputPath, streamWritersToClose);
 
             // Export MPEG video
-            (var videoMeta, var width, var height, var audioFormat) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
+            (var videoMeta, var width, var height, var audioFormat, var audioFormat2) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
 
             if (videoMeta is not null)
             {
@@ -242,6 +276,7 @@ namespace HoloLensCaptureExporter
                 var frameRate = frameRateNumerator / frameRateDenominator;
                 var mpegFile = EnsurePathExists(Path.Combine(exportCommand.OutputPath, "Video", $"Video.mpeg"));
                 var audioOutputFormat = WaveFormat.Create16BitPcm((int)(audioFormat?.SamplesPerSec ?? 0), audioFormat?.Channels ?? 0);
+                var audioOutputFormat_new = WaveFormat.Create16BitPcm((int)(audioFormat?.SamplesPerSec ?? 0), (audioFormat?.Channels ?? 0) + (audioFormat2?.Channels ?? 0));
                 var mpegWriter = new Mpeg4Writer(p, mpegFile, new Mpeg4WriterConfiguration()
                 {
                     ImageWidth = (uint)width,
@@ -398,7 +433,7 @@ namespace HoloLensCaptureExporter
             return path;
         }
 
-        private static (IStreamMetadata VideoMetadata, int Width, int Height, WaveFormat AudioFormat) GetAudioAndVideoInfo(string storeName, string storePath)
+        private static (IStreamMetadata VideoMetadata, int Width, int Height, WaveFormat AudioFormat, WaveFormat AudioFormat2) GetAudioAndVideoInfo(string storeName, string storePath)
         {
             // determine properties for the mpeg writer by peeking at the first video and audio messages
             using var p = Pipeline.Create();
@@ -451,7 +486,9 @@ namespace HoloLensCaptureExporter
 
             // Get the audio format by examining the first audio message (if one exists).
             WaveFormat audioFormat = null;
+            WaveFormat audioFormat2 = null;
             var audioWaitHandle = new EventWaitHandle(false, EventResetMode.ManualReset);
+            var audioWaitHandle2 = new EventWaitHandle(false, EventResetMode.ManualReset);
 
             if (TryGetMetadata(AudioStreamName, out var audioMeta))
             {
@@ -466,11 +503,24 @@ namespace HoloLensCaptureExporter
                 audioWaitHandle.Set();
             }
 
+            if (TryGetMetadata("ExternalMicrophone", out var audioMeta2))
+            {
+                store.OpenStream<AudioBuffer>("ExternalMicrophone").First().Do((a, env) =>
+                {
+                    audioFormat2 = a.Format;
+                    audioWaitHandle2.Set();
+                });
+            }
+            else
+            {
+                audioWaitHandle2.Set();
+            }
+
             // Run the pipeline, just until we've read the first video and audio message
             p.RunAsync();
-            WaitHandle.WaitAll(new WaitHandle[2] { videoWaitHandle, audioWaitHandle });
+            WaitHandle.WaitAll(new WaitHandle[2] { videoWaitHandle, audioWaitHandle }); // restore to 3
 
-            return (videoMetadata, width, height, audioFormat);
+            return (videoMetadata, width, height, audioFormat, audioFormat2);
         }
 
         /// <summary>
