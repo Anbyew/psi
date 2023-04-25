@@ -53,7 +53,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Test.Psi.Speech.Windows", "
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Test.Psi.Audio", "Sources\Audio\Test.Psi.Audio\Test.Psi.Audio.csproj", "{7D481D0D-75C2-4E9F-9FE3-43EB63403F2B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Test.Psi.Imaging.Windows", "Sources\Imaging\Test.Psi.Imaging.Windows\Test.Psi.Imaging.Windows.csproj", "{191DF615-3D8F-45A3-B763-DD4A604A712A}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Test.Psi.Imaging.Windows", "Sources\Imaging\Test.Psi.Imaging.Windows\Test.Psi.Imaging.Windows.csproj", "{191DF615-3D8F-45A3-B763-DD4A604A712A}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Toolkits", "Toolkits", "{B592009C-5137-4D7F-8B50-C7D8500230D6}"
 EndProject
@@ -228,6 +228,11 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "HoloLensCaptureInterop", "Sources\MixedReality\HoloLensCapture\HoloLensCaptureInterop\HoloLensCaptureInterop.csproj", "{76E38559-0AF2-4AE3-BCE8-8653277A5B07}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Test.Psi.Calibration", "Sources\Calibration\Test.Psi.Calibration\Test.Psi.Calibration.csproj", "{41FBDC53-3167-4DEA-8B87-CFCCAFBCE7DD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SeparateData", "SeparateData\SeparateData.csproj", "{4892DD89-9216-45E5-B039-37A6DFFBBC85}"
+	ProjectSection(ProjectDependencies) = postProject
+		{04147400-0AB0-4F07-9975-D4B7E58150DB} = {04147400-0AB0-4F07-9975-D4B7E58150DB}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -513,6 +518,10 @@ Global
 		{41FBDC53-3167-4DEA-8B87-CFCCAFBCE7DD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{41FBDC53-3167-4DEA-8B87-CFCCAFBCE7DD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{41FBDC53-3167-4DEA-8B87-CFCCAFBCE7DD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4892DD89-9216-45E5-B039-37A6DFFBBC85}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4892DD89-9216-45E5-B039-37A6DFFBBC85}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4892DD89-9216-45E5-B039-37A6DFFBBC85}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4892DD89-9216-45E5-B039-37A6DFFBBC85}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -613,6 +622,7 @@ Global
 		{1C844B9E-A51C-483C-A045-7AB8F2012581} = {49072585-8CC1-43A5-BE0D-ABCE888BC5D1}
 		{76E38559-0AF2-4AE3-BCE8-8653277A5B07} = {49072585-8CC1-43A5-BE0D-ABCE888BC5D1}
 		{41FBDC53-3167-4DEA-8B87-CFCCAFBCE7DD} = {DF620739-6A2F-49F0-A732-6575879F1D86}
+		{4892DD89-9216-45E5-B039-37A6DFFBBC85} = {49072585-8CC1-43A5-BE0D-ABCE888BC5D1}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {EAF15EE9-DCC5-411B-A9E5-7C2F3D132331}

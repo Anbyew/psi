@@ -5,9 +5,11 @@ namespace HoloLensCaptureExporter
 {
     using System;
     using System.Collections.Generic;
+    using System.Drawing.Printing;
     using System.IO;
     using System.Linq;
     using System.Threading;
+    using System.Threading.Tasks;
     using MathNet.Spatial.Euclidean;
     using Microsoft.Psi;
     using Microsoft.Psi.Audio;
@@ -266,7 +268,7 @@ namespace HoloLensCaptureExporter
             sceneUnderstanding?.Export("SceneUnderstanding", exportCommand.OutputPath, streamWritersToClose);
 
             // Export MPEG video
-            (var videoMeta, var width, var height, var audioFormat, var audioFormat2) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
+            (var videoMeta, var width, var height, var audioFormat) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
 
             if (videoMeta is not null)
             {
@@ -276,7 +278,7 @@ namespace HoloLensCaptureExporter
                 var frameRate = frameRateNumerator / frameRateDenominator;
                 var mpegFile = EnsurePathExists(Path.Combine(exportCommand.OutputPath, "Video", $"Video.mpeg"));
                 var audioOutputFormat = WaveFormat.Create16BitPcm((int)(audioFormat?.SamplesPerSec ?? 0), audioFormat?.Channels ?? 0);
-                var audioOutputFormat_new = WaveFormat.Create16BitPcm((int)(audioFormat?.SamplesPerSec ?? 0), (audioFormat?.Channels ?? 0) + (audioFormat2?.Channels ?? 0));
+
                 var mpegWriter = new Mpeg4Writer(p, mpegFile, new Mpeg4WriterConfiguration()
                 {
                     ImageWidth = (uint)width,
@@ -305,6 +307,296 @@ namespace HoloLensCaptureExporter
                 {
                     var mpegAudio = audio.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
                     mpegAudio.PipeTo(mpegWriter.AudioIn);
+
+                    // Compute frame ticks for the resampled video
+                    mpegVideoTicks = mpegAudio
+                        .Select((m, e) => e.OriginatingTime - m.Duration)
+                        .Zip(decodedVideo.TimeOf())
+                        .Process<DateTime[], bool>((m, e, emitter) =>
+                        {
+                            if (emitter.LastEnvelope.OriginatingTime == default)
+                            {
+                                // The mpeg "start time" will be the minimum time of the first video message and *start* of the first (resampled) audio buffer.
+                                emitter.Post(true, m.Min());
+                            }
+
+                            while (emitter.LastEnvelope.OriginatingTime <= e.OriginatingTime)
+                            {
+                                emitter.Post(true, emitter.LastEnvelope.OriginatingTime + mpegVideoInterval);
+                            }
+                        });
+
+                    // Zip with the resampled audio times
+                    mpegTicks = mpegAudio.Select(_ => true).Zip(mpegVideoTicks).Select(a => a.First());
+                }
+                else
+                {
+                    // Compute frame ticks for the resampled video
+                    mpegVideoTicks = decodedVideo.Process<ImageCameraView, bool>((_, e, emitter) =>
+                    {
+                        if (emitter.LastEnvelope.OriginatingTime == default)
+                        {
+                            emitter.Post(true, e.OriginatingTime);
+                        }
+
+                        while (emitter.LastEnvelope.OriginatingTime <= e.OriginatingTime)
+                        {
+                            emitter.Post(true, emitter.LastEnvelope.OriginatingTime + mpegVideoInterval);
+                        }
+                    });
+
+                    // No audio, so the mpeg start/end times are just the time of the first/last video message.
+                    mpegTicks = mpegVideoTicks;
+                }
+
+                // Video
+                mpegVideoTicks
+                    .Join(decodedVideo, Reproducible.Nearest<ImageCameraView>()).Select(tuple => tuple.Item2.ViewedObject)
+                    .PipeTo(mpegWriter);
+
+                // Write the mpeg start and end times time
+                mpegTicks.First().Do((_, e) => mpegTimingFile.WriteLine($"{e.OriginatingTime.ToText()}"));
+                mpegTicks.Last().Do((_, e) => mpegTimingFile.WriteLine($"{e.OriginatingTime.ToText()}"));
+            }
+
+            Console.WriteLine($"Exporting {exportCommand.StoreName} to {exportCommand.OutputPath}");
+            var startTime = DateTime.Now;
+            p.RunAsync(ReplayDescriptor.ReplayAll, progress: new Progress<double>(p => Console.Write($"Progress: {p:P} Time elapsed: {DateTime.Now - startTime}\r")));
+            p.WaitAll();
+
+            foreach (var sw in streamWritersToClose)
+            {
+                sw.Close();
+            }
+
+            Console.WriteLine();
+            Console.WriteLine($"Done in {DateTime.Now - startTime}.");
+
+            return 0;
+        }
+
+        /// <summary>
+        /// Exports data based on the specified export command. Only exports Video/Text/StepDetection.
+        /// </summary>
+        /// <param name="exportCommand">The export command.</param>
+        /// <returns>An error code or 0 if success.</returns>
+        public static int RunOnlyNeeded(Verbs.ExportCommand exportCommand)
+        {
+            var pngEncoder = new ImageToPngStreamEncoder();
+            var decoder = new ImageFromStreamDecoder();
+
+            // Create a pipeline
+            using var p = Pipeline.Create(deliveryPolicy: DeliveryPolicy.Throttle);
+
+            // Open the psi store for reading
+            PsiImporter store = PsiStore.Open(p, exportCommand.StoreName, exportCommand.StorePath);
+
+            // Open the "anno" psi store for reading annotations and step segments
+            PsiImporter stepStore = null;
+            PsiImporter asrUserStore = null;
+            PsiImporter asrInstructorStore = null;
+            if (exportCommand.StepDetection)
+            {
+                stepStore = PsiStore.Open(p, exportCommand.StoreNameStepDetection, exportCommand.StorePath);
+            }
+
+            if (exportCommand.TextASR)
+            {
+                asrUserStore = PsiStore.Open(p, exportCommand.StoreNameTextASRUser, exportCommand.StorePath);
+                asrInstructorStore = PsiStore.Open(p, exportCommand.StoreNameTextASRInstructor, exportCommand.StorePath);
+            }
+
+            // Get references to the various streams. If a stream is not present in the store,
+            // the reference will be null.
+            var audio = store.OpenStreamOrDefault<AudioBuffer>(AudioStreamName);
+            var externalMicrophone = store.OpenStreamOrDefault<AudioBuffer>("ExternalMicrophone");
+            var videoEncodedImageCameraView = store.OpenStreamOrDefault<EncodedImageCameraView>(VideoEncodedStreamName);
+            var videoImageCameraView = store.OpenStreamOrDefault<ImageCameraView>(VideoStreamName);
+            var previewEncodedImageCameraView = store.OpenStreamOrDefault<EncodedImageCameraView>("PreviewEncodedImageCameraView");
+            var previewImageCameraView = store.OpenStreamOrDefault<ImageCameraView>("PreviewImageCameraView");
+
+            // Optional streams for annotations
+            var stepDetection = exportCommand.StepDetection ? stepStore.OpenStreamOrDefault<TimeIntervalAnnotationSet>(exportCommand.StoreNameStepDetection) : null;
+            var userASR = exportCommand.TextASR ? asrUserStore.OpenStreamOrDefault<TimeIntervalAnnotationSet>(exportCommand.StoreNameTextASRUser) : null;
+            var instructorASR = exportCommand.TextASR ? asrInstructorStore.OpenStreamOrDefault<TimeIntervalAnnotationSet>(exportCommand.StoreNameTextASRInstructor) : null;
+
+            // Verify expected stream combinations
+            void VerifyMutualExclusivity(dynamic a, dynamic b, string name)
+            {
+                if (a != null && b != null)
+                {
+                    throw new Exception($"Found both encoded and unencoded {name} streams (expected one or the other).");
+                }
+            }
+
+            VerifyMutualExclusivity(videoEncodedImageCameraView, videoImageCameraView, "video");
+            VerifyMutualExclusivity(previewEncodedImageCameraView, previewImageCameraView, "preview");
+
+            // Construct a list of stream writers to export data with (these will be closed once
+            // the export pipeline is completed)
+            var streamWritersToClose = new List<StreamWriter>();
+
+            // Export various encoded image camera views
+            IProducer<ImageCameraView> Export(
+                string name,
+                IProducer<ImageCameraView> imageCameraView,
+                IProducer<EncodedImageCameraView> encodedImageCameraView,
+                IProducer<EncodedImageCameraView> gzipImageCameraView = null,
+                bool isNV12 = false)
+            {
+                void VerifyMutualExclusivity(dynamic s0, dynamic s1)
+                {
+                    if (s0 != null || s1 != null)
+                    {
+                        throw new Exception($"Expected single stream for each camera (found multiple for {name}).");
+                    }
+                }
+
+                if (imageCameraView != null)
+                {
+                    // export raw camera view as lossless PNG
+                    VerifyMutualExclusivity(encodedImageCameraView, gzipImageCameraView);
+
+                    // imageCameraView.Encode(pngEncoder).Export(name, exportCommand.OutputPath, streamWritersToClose);
+                    return imageCameraView;
+                }
+
+                if (encodedImageCameraView != null)
+                {
+                    VerifyMutualExclusivity(imageCameraView, gzipImageCameraView);
+                    var decoded = encodedImageCameraView.Decode(decoder);
+                    if (isNV12)
+                    {
+                        // export NV12-encoded camera view as lossless PNG
+                        // decoded.Encode(pngEncoder).Export(name, exportCommand.OutputPath, streamWritersToClose);
+                    }
+                    else
+                    {
+                        // export encoded camera view as is
+                        // encodedImageCameraView.Export(name, exportCommand.OutputPath, streamWritersToClose);
+                    }
+
+                    return decoded;
+                }
+
+                if (gzipImageCameraView != null)
+                {
+                    // export GZIP'd camera view as lossless PNG
+                    VerifyMutualExclusivity(imageCameraView, encodedImageCameraView);
+                    var decoded = gzipImageCameraView.Decode(decoder);
+
+                    // decoded.Encode(pngEncoder).Export(name, exportCommand.OutputPath, streamWritersToClose);
+                    return decoded;
+                }
+
+                return null;
+            }
+
+            var decodedVideo = Export("Video", videoImageCameraView, videoEncodedImageCameraView, isNV12: true);
+
+            // Export audio
+            audio?.Export("Audio", exportCommand.OutputPath, streamWritersToClose);
+
+            // Export external microphone
+            externalMicrophone?.Export("ExternalMicrophone", exportCommand.OutputPath, streamWritersToClose);
+
+            // Export step detection
+            if (exportCommand.StepDetection)
+            {
+                stepDetection?.Export("StepDetection", "StepDetection", exportCommand.OutputPath, streamWritersToClose);
+            }
+
+            if (exportCommand.TextASR)
+            {
+                userASR?.Export("TextASR", "UserAnnotations", exportCommand.OutputPath, streamWritersToClose);
+                instructorASR?.Export("TextASR", "InstructorAnnotations", exportCommand.OutputPath, streamWritersToClose);
+            }
+
+            // Export MPEG video
+            (var videoMeta, var width, var height, var audioFormat) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
+
+            // (var videoMeta, var width, var height, var audioFormat, var audioFormat2) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
+            if (videoMeta is not null)
+            {
+                // Configure and initialize the mpeg writer
+                var frameRateNumerator = (uint)(videoMeta.MessageCount - 1);
+                var frameRateDenominator = (uint)((videoMeta.LastMessageOriginatingTime - videoMeta.FirstMessageOriginatingTime).TotalSeconds + 0.5);
+                var frameRate = frameRateNumerator / frameRateDenominator;
+                var mpegFile = EnsurePathExists(Path.Combine(exportCommand.OutputPath, "Video", $"Video.mpeg"));
+                var audioOutputFormat = WaveFormat.Create16BitPcm((int)(audioFormat?.SamplesPerSec ?? 0), 2);
+
+                // var audioOutputFormat_new = WaveFormat.Create16BitPcm((int)(audioFormat?.SamplesPerSec ?? 0), (audioFormat?.Channels ?? 0) + (audioFormat2?.Channels ?? 0));
+                var mpegWriter = new Mpeg4Writer(p, mpegFile, new Mpeg4WriterConfiguration()
+                {
+                    ImageWidth = (uint)width,
+                    ImageHeight = (uint)height,
+                    FrameRateNumerator = frameRateNumerator,
+                    FrameRateDenominator = frameRateDenominator,
+                    PixelFormat = PixelFormat.BGRA_32bpp,
+                    TargetBitrate = 10000000,
+                    ContainsAudio = audioFormat != null,
+                    AudioBitsPerSample = audioOutputFormat.BitsPerSample,
+                    AudioChannels = audioOutputFormat.Channels,
+                    AudioSamplesPerSecond = audioOutputFormat.SamplesPerSec,
+                });
+                Console.WriteLine($"Channels: {audioOutputFormat.Channels}, samples per second: {audioOutputFormat.SamplesPerSec}, bits per sample: {audioOutputFormat.BitsPerSample}");
+
+                // We will need to resample the video stream for the mpeg
+                var mpegVideoInterval = TimeSpan.FromSeconds(1.0 / frameRate);
+                IProducer<bool> mpegVideoTicks;
+                IProducer<bool> mpegTicks;
+
+                // Write "start" and "end" times of the mpeg to file
+                var mpegTimingFile = File.CreateText(EnsurePathExists(Path.Combine(exportCommand.OutputPath, "Video", "VideoMpegTiming.txt")));
+                streamWritersToClose.Add(mpegTimingFile);
+
+                // Audio
+                if (audioFormat is not null)
+                {
+                    Console.WriteLine("NOW2 my code is running");
+                    var mpegAudio = audio.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
+                    var mpegAudioExternalMicrophone = externalMicrophone.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
+                    mpegAudio.Join(mpegAudioExternalMicrophone, RelativeTimeInterval.Infinite)
+                        .Select((a, e) =>
+                        {
+                            var left = a.Item1;
+                            var right = a.Item2;
+                            Console.WriteLine($"left: {left.Data.Length}, right: {right.Data.Length}");
+                            var leftSamples = left.Data;
+                            var rightSamples = right.Data;
+                            var numSamples = Math.Min(leftSamples.Length, rightSamples.Length);
+                            var interleavedSamples = new byte[numSamples];
+
+                            for (int i = 0; i < numSamples; i++)
+                            {
+                                interleavedSamples[i] = (byte)(leftSamples[i] + rightSamples[i]);
+                            }
+
+                            return new AudioBuffer(interleavedSamples, audioOutputFormat);
+                        })
+                        .PipeTo(mpegWriter.AudioIn);
+
+                    // var joinedAudio_old = mpegAudio.Join(mpegAudioExternalMicrophone, Reproducible.Nearest(RelativeTimeInterval.Past()));
+                    // mpegAudio.Fuse<AudioBuffer, AudioBuffer, Reproducible.Nearest<AudioBuffer>>(
+                    //    mpegAudioExternalMicrophone,
+                    //    TimeSpan.FromSeconds(1),
+                    //    Reproducible.Nearest<AudioBuffer>(TimeSpan.FromSeconds(1)),
+                    //    (left, right, a) =>
+                    // {
+                    //    var leftSamples = left.Data;
+                    //    var rightSamples = right.Data;
+                    //    var numSamples = Math.Min(leftSamples.Length, rightSamples.Length);
+                    //    var interleavedSamples = new byte[numSamples];
+
+                    // for (int i = 0; i < numSamples; i++)
+                    //    {
+                    //        interleavedSamples[i] = (byte)(leftSamples[i] + rightSamples[i]);
+                    //    }
+
+                    // return new AudioBuffer(interleavedSamples, audioOutputFormat);
+                    // }).Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, }).PipeTo(mpegWriter.AudioIn);
+
+                    // mpegWriter.AudioIn = interleavedAudioBuffer.Out;
 
                     // Compute frame ticks for the resampled video
                     mpegVideoTicks = mpegAudio
@@ -433,7 +725,7 @@ namespace HoloLensCaptureExporter
             return path;
         }
 
-        private static (IStreamMetadata VideoMetadata, int Width, int Height, WaveFormat AudioFormat, WaveFormat AudioFormat2) GetAudioAndVideoInfo(string storeName, string storePath)
+        private static (IStreamMetadata VideoMetadata, int Width, int Height, WaveFormat AudioFormat) GetAudioAndVideoInfo(string storeName, string storePath)
         {
             // determine properties for the mpeg writer by peeking at the first video and audio messages
             using var p = Pipeline.Create();
@@ -486,10 +778,11 @@ namespace HoloLensCaptureExporter
 
             // Get the audio format by examining the first audio message (if one exists).
             WaveFormat audioFormat = null;
-            WaveFormat audioFormat2 = null;
-            var audioWaitHandle = new EventWaitHandle(false, EventResetMode.ManualReset);
-            var audioWaitHandle2 = new EventWaitHandle(false, EventResetMode.ManualReset);
 
+            // WaveFormat audioFormat2 = null;
+            var audioWaitHandle = new EventWaitHandle(false, EventResetMode.ManualReset);
+
+            // var audioWaitHandle2 = new EventWaitHandle(false, EventResetMode.ManualReset);
             if (TryGetMetadata(AudioStreamName, out var audioMeta))
             {
                 store.OpenStream<AudioBuffer>(AudioStreamName).First().Do((a, env) =>
@@ -503,24 +796,25 @@ namespace HoloLensCaptureExporter
                 audioWaitHandle.Set();
             }
 
-            if (TryGetMetadata("ExternalMicrophone", out var audioMeta2))
-            {
-                store.OpenStream<AudioBuffer>("ExternalMicrophone").First().Do((a, env) =>
-                {
-                    audioFormat2 = a.Format;
-                    audioWaitHandle2.Set();
-                });
-            }
-            else
-            {
-                audioWaitHandle2.Set();
-            }
+            // if (TryGetMetadata("ExternalMicrophone", out var audioMeta2))
+            // {
+            //    store.OpenStream<AudioBuffer>("ExternalMicrophone").First().Do((a, env) =>
+            //    {
+            //        audioFormat2 = a.Format;
+            //        audioWaitHandle2.Set();
+            //    });
+            // }
+            // else
+            // {
+            //    audioWaitHandle2.Set();
+            // }
 
             // Run the pipeline, just until we've read the first video and audio message
             p.RunAsync();
             WaitHandle.WaitAll(new WaitHandle[2] { videoWaitHandle, audioWaitHandle }); // restore to 3
 
-            return (videoMetadata, width, height, audioFormat, audioFormat2);
+            // return (videoMetadata, width, height, audioFormat, audioFormat2);
+            return (videoMetadata, width, height, audioFormat);
         }
 
         /// <summary>

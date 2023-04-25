@@ -32,7 +32,7 @@ namespace HoloLensCaptureExporter
                             }
                             else
                             {
-                                return DataExporter.Run(command);
+                                return DataExporter.RunOnlyNeeded(command);
                             }
                         },
                         DisplayParseErrors);

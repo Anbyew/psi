@@ -5,6 +5,7 @@ namespace HoloLensCaptureExporter
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.Globalization;
     using System.IO;
     using System.Linq;
@@ -23,6 +24,7 @@ namespace HoloLensCaptureExporter
     using Microsoft.Psi.MixedReality.WinRT;
     using Microsoft.Psi.Spatial.Euclidean;
     using Microsoft.Psi.Speech;
+    using SharpDX;
     using SharpDX.Direct3D9;
     using OpenXRHand = Microsoft.Psi.MixedReality.OpenXR.Hand;
     using OpenXRHandsSensor = Microsoft.Psi.MixedReality.OpenXR.HandsSensor;
@@ -477,6 +479,20 @@ namespace HoloLensCaptureExporter
                     source.Out.Pipeline,
                     DataExporter.EnsurePathExists(Path.Combine(outputPath, name, $"{name}.wav"))));
 
+            // Write start and ending time
+            var timestampsFilePath = DataExporter.EnsurePathExists(Path.Combine(outputPath, name, $"{name}-timestamps.txt"));
+            var timestampsFile = File.CreateText(timestampsFilePath);
+            streamWritersToClose.Add(timestampsFile);
+            source.First().Do((_, e) => timestampsFile.WriteLine($"{e.OriginatingTime.ToText()}"));
+            source.Last().Do((_, e) => timestampsFile.WriteLine($"{e.OriginatingTime.ToText()}"));
+
+            // Do not export transcriptions or buffers
+            var a = 1;
+            if (a == 1)
+            {
+                return;
+            }
+
             // export individual raw audio buffers to `Audio000123.bin` files along with timing information
             var buffersPath = Path.Combine(outputPath, name, "Buffers");
             var timingFilePath = DataExporter.EnsurePathExists(Path.Combine(buffersPath, $"Timing.txt"));
@@ -497,13 +513,6 @@ namespace HoloLensCaptureExporter
                             timingFile.WriteLine($"{bufferCounter++}\t{envelope.OriginatingTime.ToText()}");
                         }
                     });
-
-            // export transcriptions
-            var a = 1;
-            if (a == 1)
-            {
-                return;
-            }
 
             var resampledAudio = new AudioResampler(
                 source.Out.Pipeline,
@@ -686,7 +695,6 @@ namespace HoloLensCaptureExporter
                     (map, envelope) =>
                     {
                         var result = new StringBuilder();
-                        result.Append($"{envelope.OriginatingTime.ToText()}\t");
                         var track = map.Tracks.FirstOrDefault();
 
                         result.Append($"{map[track].Interval.Left.ToText()}\t");
