@@ -42,7 +42,7 @@ namespace HoloLensCaptureExporter
             /// <summary>
             /// Gets or sets a value indicating whether to export step detections.
             /// </summary>
-            [Option('s', "step-detection", Required = false, HelpText = "Whether to export step detection segments (default: false) (default: false).")]
+            [Option('s', "step-detection", Required = false, HelpText = "Whether to export step detection segments (default: false).")]
             public bool StepDetection { get; set; } = false;
 
             /// <summary>

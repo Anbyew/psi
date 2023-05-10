@@ -553,7 +553,6 @@ namespace HoloLensCaptureExporter
                 // Audio
                 if (audioFormat is not null)
                 {
-                    Console.WriteLine("NOW2 my code is running");
                     var mpegAudio = audio.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
                     var mpegAudioExternalMicrophone = externalMicrophone.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
                     mpegAudio.Join(mpegAudioExternalMicrophone, RelativeTimeInterval.Infinite)
@@ -561,7 +560,8 @@ namespace HoloLensCaptureExporter
                         {
                             var left = a.Item1;
                             var right = a.Item2;
-                            Console.WriteLine($"left: {left.Data.Length}, right: {right.Data.Length}");
+
+                            // Console.WriteLine($"left: {left.Data.Length}, right: {right.Data.Length}");
                             var leftSamples = left.Data;
                             var rightSamples = right.Data;
                             var numSamples = Math.Min(leftSamples.Length, rightSamples.Length);
