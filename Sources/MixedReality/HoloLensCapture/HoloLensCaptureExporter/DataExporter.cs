@@ -19,6 +19,7 @@ namespace HoloLensCaptureExporter
     using Microsoft.Psi.Media;
     using Microsoft.Psi.MixedReality;
     using Microsoft.Psi.Spatial.Euclidean;
+    using SharpDX.Direct3D9;
     using OpenXRHand = Microsoft.Psi.MixedReality.OpenXR.Hand;
     using StereoKitHand = Microsoft.Psi.MixedReality.StereoKit.Hand;
     using WinRTEyes = Microsoft.Psi.MixedReality.WinRT.Eyes;
@@ -494,6 +495,7 @@ namespace HoloLensCaptureExporter
 
             var decodedVideo = Export("Video", videoImageCameraView, videoEncodedImageCameraView, isNV12: true);
 
+            /*
             // Export audio
             audio?.Export("Audio", exportCommand.OutputPath, streamWritersToClose);
 
@@ -511,6 +513,7 @@ namespace HoloLensCaptureExporter
                 userASR?.Export("TextASR", "UserAnnotations", exportCommand.OutputPath, streamWritersToClose);
                 instructorASR?.Export("TextASR", "InstructorAnnotations", exportCommand.OutputPath, streamWritersToClose);
             }
+            */
 
             // Export MPEG video
             (var videoMeta, var width, var height, var audioFormat) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
@@ -555,7 +558,7 @@ namespace HoloLensCaptureExporter
                 {
                     var mpegAudio = audio.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
                     var mpegAudioExternalMicrophone = externalMicrophone.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
-                    mpegAudio.Join(mpegAudioExternalMicrophone, RelativeTimeInterval.Infinite)
+                    var mergedAudios = mpegAudio.Join(mpegAudioExternalMicrophone, RelativeTimeInterval.Infinite)
                         .Select((a, e) =>
                         {
                             var left = a.Item1;
@@ -573,8 +576,9 @@ namespace HoloLensCaptureExporter
                             }
 
                             return new AudioBuffer(interleavedSamples, audioOutputFormat);
-                        })
-                        .PipeTo(mpegWriter.AudioIn);
+                        });
+                    mergedAudios.PipeTo(mpegWriter.AudioIn);
+                    mergedAudios.Export("MergedAudio", exportCommand.OutputPath, streamWritersToClose);
 
                     // var joinedAudio_old = mpegAudio.Join(mpegAudioExternalMicrophone, Reproducible.Nearest(RelativeTimeInterval.Past()));
                     // mpegAudio.Fuse<AudioBuffer, AudioBuffer, Reproducible.Nearest<AudioBuffer>>(
@@ -599,7 +603,7 @@ namespace HoloLensCaptureExporter
                     // mpegWriter.AudioIn = interleavedAudioBuffer.Out;
 
                     // Compute frame ticks for the resampled video
-                    mpegVideoTicks = mpegAudio
+                    mpegVideoTicks = mergedAudios
                         .Select((m, e) => e.OriginatingTime - m.Duration)
                         .Zip(decodedVideo.TimeOf())
                         .Process<DateTime[], bool>((m, e, emitter) =>
@@ -617,7 +621,7 @@ namespace HoloLensCaptureExporter
                         });
 
                     // Zip with the resampled audio times
-                    mpegTicks = mpegAudio.Select(_ => true).Zip(mpegVideoTicks).Select(a => a.First());
+                    mpegTicks = mergedAudios.Select(_ => true).Zip(mpegVideoTicks).Select(a => a.First());
                 }
                 else
                 {
