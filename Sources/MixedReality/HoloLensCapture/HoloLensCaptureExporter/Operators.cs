@@ -545,6 +545,88 @@ namespace HoloLensCaptureExporter
         }
 
         /// <summary>
+        /// Exports various encoded image camera views.
+        /// </summary>
+        /// <param name="name">The name for the source stream.</param>
+        /// <param name="outputPath">The output path for the encoded images.</param>
+        /// <param name="streamWritersToClose">The collection of stream writers to be closed.</param>
+        /// <param name="imageCameraView">The image camera view.</param>
+        /// <param name="encodedImageCameraView">The encoded image camera view.</param>
+        /// <param name="gzipImageCameraView">The optional gzip image camera view.</param>
+        /// <param name="isNV12">Whether the image format is NV12 or not.</param>
+        /// <param name="exportPng">Whether to export lossless PNG frames or not.</param>
+        /// <returns>Decoded image camera view stream instance (or null if given camera views are all null).</returns>
+        internal static IProducer<ImageCameraView> ExportEncodedImageCameraViews(
+            string name,
+            string outputPath,
+            List<StreamWriter> streamWritersToClose,
+            IProducer<ImageCameraView> imageCameraView,
+            IProducer<EncodedImageCameraView> encodedImageCameraView,
+            IProducer<EncodedImageCameraView> gzipImageCameraView = null,
+            bool isNV12 = false,
+            bool exportPng = true)
+        {
+            void VerifyMutualExclusivity(dynamic s0, dynamic s1)
+            {
+                if (s0 != null || s1 != null)
+                {
+                    throw new Exception($"Expected single stream for each camera (found multiple for {name}).");
+                }
+            }
+
+            var pngEncoder = new ImageToPngStreamEncoder();
+            var decoder = new ImageFromStreamDecoder();
+
+            if (imageCameraView != null)
+            {
+                if (exportPng)
+                {
+                    // export raw camera view as lossless PNG
+                    VerifyMutualExclusivity(encodedImageCameraView, gzipImageCameraView);
+                    imageCameraView.Encode(pngEncoder).Export(name, outputPath, streamWritersToClose);
+                }
+
+                return imageCameraView;
+            }
+
+            if (encodedImageCameraView != null)
+            {
+                VerifyMutualExclusivity(imageCameraView, gzipImageCameraView);
+                var decoded = encodedImageCameraView.Decode(decoder);
+                if (exportPng)
+                {
+                    if (isNV12)
+                    {
+                        // export NV12-encoded camera view as lossless PNG
+                        decoded.Encode(pngEncoder).Export(name, outputPath, streamWritersToClose);
+                    }
+                    else
+                    {
+                        // export encoded camera view as is
+                        encodedImageCameraView.Export(name, outputPath, streamWritersToClose);
+                    }
+                }
+
+                return decoded;
+            }
+
+            if (gzipImageCameraView != null)
+            {
+                VerifyMutualExclusivity(imageCameraView, encodedImageCameraView);
+                var decoded = gzipImageCameraView.Decode(decoder);
+                if (exportPng)
+                {
+                    // export GZIP'd camera view as lossless PNG
+                    decoded.Encode(pngEncoder).Export(name, outputPath, streamWritersToClose);
+                }
+
+                return decoded;
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// Exports a stream of calibration maps.
         /// </summary>
         /// <param name="source">The source stream of calibration maps.</param>

@@ -30,6 +30,10 @@ namespace HoloLensCaptureExporter
                             {
                                 return DataExporter.RunAudioOnly(command);
                             }
+                            else if (command.VideoOnly)
+                            {
+                                return DataExporter.RunVideoOnly(command);
+                            }
                             else
                             {
                                 return DataExporter.Run(command);

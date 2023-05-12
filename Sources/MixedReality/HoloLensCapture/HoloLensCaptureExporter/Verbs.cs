@@ -22,6 +22,12 @@ namespace HoloLensCaptureExporter
             public bool AudioOnly { get; set; } = false;
 
             /// <summary>
+            /// Gets or sets a value indicating whether to export the video data only.
+            /// </summary>
+            [Option('v', "video-only", Required = false, HelpText = "Whether to export the audio data only (default: false).")]
+            public bool VideoOnly { get; set; } = false;
+
+            /// <summary>
             /// Gets or sets the file path of the input Psi data store.
             /// </summary>
             [Option('n', "name", Required = false, HelpText = "Name of the input Psi data store (default: HoloLensCapture).")]
