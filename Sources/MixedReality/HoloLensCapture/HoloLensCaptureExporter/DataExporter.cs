@@ -210,7 +210,7 @@ namespace HoloLensCaptureExporter
             sceneUnderstanding?.Export("SceneUnderstanding", exportCommand.OutputPath, streamWritersToClose);
 
             // Export MPEG video
-            (var videoMeta, var width, var height, var audioFormat) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
+            (var videoMeta, var width, var height, var audioFormat, var externalMicrophoneAudioFormat) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
 
             if (videoMeta is not null)
             {
@@ -244,7 +244,7 @@ namespace HoloLensCaptureExporter
                 streamWritersToClose.Add(mpegTimingFile);
 
                 // Audio
-                if (audioFormat is not null)
+                if (audioFormat is not null && externalMicrophoneAudioFormat is not null)
                 {
                     var mpegAudio = audio.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
                     mpegAudio.PipeTo(mpegWriter.AudioIn);
@@ -387,7 +387,7 @@ namespace HoloLensCaptureExporter
             var decodedVideo = Operators.ExportEncodedImageCameraViews("Video", exportCommand.OutputPath, streamWritersToClose, videoImageCameraView, videoEncodedImageCameraView, isNV12: true, exportPng: false);
 
             // Export MPEG video
-            (var videoMeta, var width, var height, var audioFormat) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
+            (var videoMeta, var width, var height, var audioFormat, var externalMicrophoneAudioFormat) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
 
             if (videoMeta is not null)
             {
@@ -421,7 +421,7 @@ namespace HoloLensCaptureExporter
                 streamWritersToClose.Add(mpegTimingFile);
 
                 // Audio
-                if (audioFormat is not null)
+                if (audioFormat is not null && externalMicrophoneAudioFormat is not null)
                 {
                     var mpegAudio = audio.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
                     mpegAudio.PipeTo(mpegWriter.AudioIn);
@@ -509,7 +509,7 @@ namespace HoloLensCaptureExporter
             return path;
         }
 
-        private static (IStreamMetadata VideoMetadata, int Width, int Height, WaveFormat AudioFormat) GetAudioAndVideoInfo(string storeName, string storePath)
+        private static (IStreamMetadata VideoMetadata, int Width, int Height, WaveFormat AudioFormat, WaveFormat ExternalMicrophoneAudioFormat) GetAudioAndVideoInfo(string storeName, string storePath)
         {
             // determine properties for the mpeg writer by peeking at the first video and audio messages
             using var p = Pipeline.Create();
@@ -577,11 +577,27 @@ namespace HoloLensCaptureExporter
                 audioWaitHandle.Set();
             }
 
+            WaveFormat externalMicrophoneAudioFormat = null;
+            var externalMicrophoneAudioWaitHandle = new EventWaitHandle(false, EventResetMode.ManualReset);
+
+            if (TryGetMetadata(AudioStreamName, out var externalMicrophoneAudioMeta))
+            {
+                store.OpenStream<AudioBuffer>("ExternalMicrophone").First().Do((a, env) =>
+                {
+                    externalMicrophoneAudioFormat = a.Format;
+                    externalMicrophoneAudioWaitHandle.Set();
+                });
+            }
+            else
+            {
+                externalMicrophoneAudioWaitHandle.Set();
+            }
+
             // Run the pipeline, just until we've read the first video and audio message
             p.RunAsync();
-            WaitHandle.WaitAll(new WaitHandle[2] { videoWaitHandle, audioWaitHandle });
+            WaitHandle.WaitAll(new WaitHandle[3] { videoWaitHandle, audioWaitHandle, externalMicrophoneAudioWaitHandle });
 
-            return (videoMetadata, width, height, audioFormat);
+            return (videoMetadata, width, height, audioFormat, externalMicrophoneAudioFormat);
         }
 
         /// <summary>
