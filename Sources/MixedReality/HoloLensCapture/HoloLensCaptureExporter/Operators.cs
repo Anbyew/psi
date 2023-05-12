@@ -498,6 +498,12 @@ namespace HoloLensCaptureExporter
                         }
                     });
 
+            if (AzureSpeechRegion == null || AzureSpeechKey == null)
+            {
+                Console.WriteLine($"Environment variables AzureSpeechRegion={AzureSpeechRegion} or AzureSpeechKey={AzureSpeechKey} is not set. Not exporting audio transcriptions for {name}.");
+                return;
+            }
+
             // export transcriptions
             var resampledAudio = new AudioResampler(
                 source.Out.Pipeline,
