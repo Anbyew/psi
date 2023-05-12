@@ -499,12 +499,6 @@ namespace HoloLensCaptureExporter
                     });
 
             // export transcriptions
-            var a = 1;
-            if (a == 1)
-            {
-                return;
-            }
-
             var resampledAudio = new AudioResampler(
                 source.Out.Pipeline,
                 new AudioResamplerConfiguration()
