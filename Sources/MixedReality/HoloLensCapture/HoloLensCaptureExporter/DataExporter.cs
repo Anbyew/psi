@@ -210,95 +210,7 @@ namespace HoloLensCaptureExporter
             sceneUnderstanding?.Export("SceneUnderstanding", exportCommand.OutputPath, streamWritersToClose);
 
             // Export MPEG video
-            (var videoMeta, var width, var height, var audioFormat, var externalMicrophoneAudioFormat) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
-
-            if (videoMeta is not null)
-            {
-                // Configure and initialize the mpeg writer
-                var frameRateNumerator = (uint)(videoMeta.MessageCount - 1);
-                var frameRateDenominator = (uint)((videoMeta.LastMessageOriginatingTime - videoMeta.FirstMessageOriginatingTime).TotalSeconds + 0.5);
-                var frameRate = frameRateNumerator / frameRateDenominator;
-                var mpegFile = EnsurePathExists(Path.Combine(exportCommand.OutputPath, "Video", $"Video.mpeg"));
-                var audioOutputFormat = WaveFormat.Create16BitPcm((int)(audioFormat?.SamplesPerSec ?? 0), audioFormat?.Channels ?? 0);
-                var mpegWriter = new Mpeg4Writer(p, mpegFile, new Mpeg4WriterConfiguration()
-                {
-                    ImageWidth = (uint)width,
-                    ImageHeight = (uint)height,
-                    FrameRateNumerator = frameRateNumerator,
-                    FrameRateDenominator = frameRateDenominator,
-                    PixelFormat = PixelFormat.BGRA_32bpp,
-                    TargetBitrate = 10000000,
-                    ContainsAudio = audioFormat != null,
-                    AudioBitsPerSample = audioOutputFormat.BitsPerSample,
-                    AudioChannels = audioOutputFormat.Channels,
-                    AudioSamplesPerSecond = audioOutputFormat.SamplesPerSec,
-                });
-
-                // We will need to resample the video stream for the mpeg
-                var mpegVideoInterval = TimeSpan.FromSeconds(1.0 / frameRate);
-                IProducer<bool> mpegVideoTicks;
-                IProducer<bool> mpegTicks;
-
-                // Write "start" and "end" times of the mpeg to file
-                var mpegTimingFile = File.CreateText(EnsurePathExists(Path.Combine(exportCommand.OutputPath, "Video", "VideoMpegTiming.txt")));
-                streamWritersToClose.Add(mpegTimingFile);
-
-                // Audio
-                if (audioFormat is not null && externalMicrophoneAudioFormat is not null)
-                {
-                    var mpegAudio = audio.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
-                    mpegAudio.PipeTo(mpegWriter.AudioIn);
-
-                    // Compute frame ticks for the resampled video
-                    mpegVideoTicks = mpegAudio
-                        .Select((m, e) => e.OriginatingTime - m.Duration)
-                        .Zip(decodedVideo.TimeOf())
-                        .Process<DateTime[], bool>((m, e, emitter) =>
-                        {
-                            if (emitter.LastEnvelope.OriginatingTime == default)
-                            {
-                                // The mpeg "start time" will be the minimum time of the first video message and *start* of the first (resampled) audio buffer.
-                                emitter.Post(true, m.Min());
-                            }
-
-                            while (emitter.LastEnvelope.OriginatingTime <= e.OriginatingTime)
-                            {
-                                emitter.Post(true, emitter.LastEnvelope.OriginatingTime + mpegVideoInterval);
-                            }
-                        });
-
-                    // Zip with the resampled audio times
-                    mpegTicks = mpegAudio.Select(_ => true).Zip(mpegVideoTicks).Select(a => a.First());
-                }
-                else
-                {
-                    // Compute frame ticks for the resampled video
-                    mpegVideoTicks = decodedVideo.Process<ImageCameraView, bool>((_, e, emitter) =>
-                    {
-                        if (emitter.LastEnvelope.OriginatingTime == default)
-                        {
-                            emitter.Post(true, e.OriginatingTime);
-                        }
-
-                        while (emitter.LastEnvelope.OriginatingTime <= e.OriginatingTime)
-                        {
-                            emitter.Post(true, emitter.LastEnvelope.OriginatingTime + mpegVideoInterval);
-                        }
-                    });
-
-                    // No audio, so the mpeg start/end times are just the time of the first/last video message.
-                    mpegTicks = mpegVideoTicks;
-                }
-
-                // Video
-                mpegVideoTicks
-                    .Join(decodedVideo, Reproducible.Nearest<ImageCameraView>()).Select(tuple => tuple.Item2.ViewedObject)
-                    .PipeTo(mpegWriter);
-
-                // Write the mpeg start and end times time
-                mpegTicks.First().Do((_, e) => mpegTimingFile.WriteLine($"{e.OriginatingTime.ToText()}"));
-                mpegTicks.Last().Do((_, e) => mpegTimingFile.WriteLine($"{e.OriginatingTime.ToText()}"));
-            }
+            ExportMPEGVideo(exportCommand.StoreName, exportCommand.StorePath, exportCommand.OutputPath, p, decodedVideo, audio, externalMicrophone, streamWritersToClose);
 
             Console.WriteLine($"Exporting {exportCommand.StoreName} to {exportCommand.OutputPath}");
             var startTime = DateTime.Now;
@@ -376,6 +288,7 @@ namespace HoloLensCaptureExporter
             // Get references to the various streams. If a stream is not present in the store,
             // the reference will be null.
             var audio = store.OpenStreamOrDefault<AudioBuffer>(AudioStreamName);
+            var externalMicrophone = store.OpenStreamOrDefault<AudioBuffer>("ExternalMicrophone");
             var videoImageCameraView = store.OpenStreamOrDefault<ImageCameraView>(VideoStreamName);
             var videoEncodedImageCameraView = store.OpenStreamOrDefault<EncodedImageCameraView>(VideoEncodedStreamName);
 
@@ -387,7 +300,43 @@ namespace HoloLensCaptureExporter
             var decodedVideo = Operators.ExportEncodedImageCameraViews("Video", exportCommand.OutputPath, streamWritersToClose, videoImageCameraView, videoEncodedImageCameraView, isNV12: true, exportPng: false);
 
             // Export MPEG video
-            (var videoMeta, var width, var height, var audioFormat, var externalMicrophoneAudioFormat) = GetAudioAndVideoInfo(exportCommand.StoreName, exportCommand.StorePath);
+            ExportMPEGVideo(exportCommand.StoreName, exportCommand.StorePath, exportCommand.OutputPath, p, decodedVideo, audio, externalMicrophone, streamWritersToClose);
+
+            Console.WriteLine($"Exporting {exportCommand.StoreName} (video only) to {exportCommand.OutputPath}");
+            var startTime = DateTime.Now;
+            p.RunAsync(ReplayDescriptor.ReplayAll, progress: new Progress<double>(p => Console.Write($"Progress: {p:P} Time elapsed: {DateTime.Now - startTime}\r")));
+            p.WaitAll();
+
+            foreach (var sw in streamWritersToClose)
+            {
+                sw.Close();
+            }
+
+            Console.WriteLine();
+            Console.WriteLine($"Done in {DateTime.Now - startTime}.");
+
+            return 0;
+        }
+
+        /// <summary>
+        /// Ensures that a specified path exists.
+        /// </summary>
+        /// <param name="path">The path to ensure the existence of.</param>
+        /// <returns>The path.</returns>
+        internal static string EnsurePathExists(string path)
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            return path;
+        }
+
+        private static void ExportMPEGVideo(string storeName, string storePath, string outputPath, Pipeline p, IProducer<ImageCameraView> decodedVideo, IProducer<AudioBuffer> audio, IProducer<AudioBuffer> externalMicrophone, List<StreamWriter> streamWritersToClose)
+        {
+            (var videoMeta, var width, var height, var audioFormat, var externalMicrophoneAudioFormat) = GetAudioAndVideoInfo(storeName, storePath);
 
             if (videoMeta is not null)
             {
@@ -395,7 +344,7 @@ namespace HoloLensCaptureExporter
                 var frameRateNumerator = (uint)(videoMeta.MessageCount - 1);
                 var frameRateDenominator = (uint)((videoMeta.LastMessageOriginatingTime - videoMeta.FirstMessageOriginatingTime).TotalSeconds + 0.5);
                 var frameRate = frameRateNumerator / frameRateDenominator;
-                var mpegFile = EnsurePathExists(Path.Combine(exportCommand.OutputPath, "Video", $"Video.mpeg"));
+                var mpegFile = EnsurePathExists(Path.Combine(outputPath, "Video", $"Video.mpeg"));
                 var audioOutputFormat = WaveFormat.Create16BitPcm((int)(audioFormat?.SamplesPerSec ?? 0), audioFormat?.Channels ?? 0);
                 var mpegWriter = new Mpeg4Writer(p, mpegFile, new Mpeg4WriterConfiguration()
                 {
@@ -417,13 +366,62 @@ namespace HoloLensCaptureExporter
                 IProducer<bool> mpegTicks;
 
                 // Write "start" and "end" times of the mpeg to file
-                var mpegTimingFile = File.CreateText(EnsurePathExists(Path.Combine(exportCommand.OutputPath, "Video", "VideoMpegTiming.txt")));
+                var mpegTimingFile = File.CreateText(EnsurePathExists(Path.Combine(outputPath, "Video", "VideoMpegTiming.txt")));
                 streamWritersToClose.Add(mpegTimingFile);
 
                 // Audio
                 if (audioFormat is not null && externalMicrophoneAudioFormat is not null)
                 {
-                    var mpegAudio = audio.Resample(new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, });
+                    // First, resample and reframe both audio streams, and convert the samples to floats so we can mix and normalize.
+                    // The reframe size of 1024 is arbitrary.
+                    var resamplerConfig = new AudioResamplerConfiguration() { OutputFormat = audioOutputFormat, };
+                    var reframeSize = 1024;
+                    var audioSamples = audio.Resample(resamplerConfig).Reframe(reframeSize).ToByteArray().ToFloat(audioOutputFormat);
+                    var externalMicrophoneSamples = externalMicrophone.Resample(resamplerConfig).Reframe(reframeSize).ToByteArray().ToFloat(audioOutputFormat);
+
+                    // Second, we mix the two audio streams by joining them using the NearestOrDefault interpolator with a symmetric relative time tolerance of half the duration of an reframed audio buffer.
+                    // Using the "Nearest" interpolator is extremely important, as without it, psi looks at the whole stream to look for the nearest audio buffer and incurs a huge latency.
+                    // Using the "NearestOrDefault" is also extremely important b/c we need to ignore audio buffers from the external microphone that do not line up closely to the HL2 audio buffers.
+                    var outputAudioBufferDuration = TimeSpan.FromTicks(10000000L * reframeSize / audioOutputFormat.AvgBytesPerSec);
+                    var mixedAudio = audioSamples
+                        .Join(externalMicrophoneSamples, Reproducible.NearestOrDefault<float[]>(new TimeSpan(outputAudioBufferDuration.Ticks / 2)))
+                        .Select((tuple, e) =>
+                        {
+                            (var samples, var externalSamples) = tuple;
+                            if (externalSamples == default)
+                            {
+                                // No nearest external microphone audio samples found, just return samples.
+                                return samples;
+                            }
+
+                            // Quick sanity check
+                            if (samples.Length != externalSamples.Length)
+                            {
+                                throw new ArgumentException($"samples.Length ({samples.Length}) != externalSamples.Length ({externalSamples.Length})");
+                            }
+
+                            var mixedSamples = new float[samples.Length];
+                            for (int i = 0; i < samples.Length; i++)
+                            {
+                                mixedSamples[i] = samples[i] + externalSamples[i];
+                            }
+
+                            return mixedSamples;
+                        });
+
+                    // Finally, convert float samples back to audio buffers.
+                    // NOTE: We skip 24-bits b/c the calculation is annoying.
+                    Func<float, byte[]> convertFloatSampleToBytes = audioOutputFormat.BitsPerSample switch
+                    {
+                        8 => f => new byte[] { (byte)f },
+                        16 => f => BitConverter.GetBytes((short)f),
+                        32 => f => BitConverter.GetBytes((int)f),
+                        _ => throw new FormatException("Valid sample sizes are 8, 16 or 32 bits"),
+                    };
+                    var mpegAudio = mixedAudio.Select(samples =>
+                    {
+                        return new AudioBuffer(samples.Select(convertFloatSampleToBytes).SelectMany(bytes => bytes).ToArray(), audioOutputFormat);
+                    });
                     mpegAudio.PipeTo(mpegWriter.AudioIn);
 
                     // Compute frame ticks for the resampled video
@@ -476,37 +474,6 @@ namespace HoloLensCaptureExporter
                 mpegTicks.First().Do((_, e) => mpegTimingFile.WriteLine($"{e.OriginatingTime.ToText()}"));
                 mpegTicks.Last().Do((_, e) => mpegTimingFile.WriteLine($"{e.OriginatingTime.ToText()}"));
             }
-
-            Console.WriteLine($"Exporting {exportCommand.StoreName} (video only) to {exportCommand.OutputPath}");
-            var startTime = DateTime.Now;
-            p.RunAsync(ReplayDescriptor.ReplayAll, progress: new Progress<double>(p => Console.Write($"Progress: {p:P} Time elapsed: {DateTime.Now - startTime}\r")));
-            p.WaitAll();
-
-            foreach (var sw in streamWritersToClose)
-            {
-                sw.Close();
-            }
-
-            Console.WriteLine();
-            Console.WriteLine($"Done in {DateTime.Now - startTime}.");
-
-            return 0;
-        }
-
-        /// <summary>
-        /// Ensures that a specified path exists.
-        /// </summary>
-        /// <param name="path">The path to ensure the existence of.</param>
-        /// <returns>The path.</returns>
-        internal static string EnsurePathExists(string path)
-        {
-            var directory = Path.GetDirectoryName(path);
-            if (!Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            return path;
         }
 
         private static (IStreamMetadata VideoMetadata, int Width, int Height, WaveFormat AudioFormat, WaveFormat ExternalMicrophoneAudioFormat) GetAudioAndVideoInfo(string storeName, string storePath)
