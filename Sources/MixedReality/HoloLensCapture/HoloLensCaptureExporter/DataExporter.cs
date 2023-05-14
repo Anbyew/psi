@@ -8,6 +8,7 @@ namespace HoloLensCaptureExporter
     using System.IO;
     using System.Linq;
     using System.Threading;
+    using MathNet.Filtering;
     using MathNet.Spatial.Euclidean;
     using Microsoft.Psi;
     using Microsoft.Psi.Audio;
@@ -379,7 +380,20 @@ namespace HoloLensCaptureExporter
                     var audioSamples = audio.Resample(resamplerConfig).Reframe(reframeSize).ToByteArray().ToFloat(audioOutputFormat);
                     var externalMicrophoneSamples = externalMicrophone.Resample(resamplerConfig).Reframe(reframeSize).ToByteArray().ToFloat(audioOutputFormat);
 
-                    // Second, we mix the two audio streams by joining them using the NearestOrDefault interpolator with a symmetric relative time tolerance of half the duration of an reframed audio buffer.
+                    // Second, apply various filters to HL2 audio to remove static.
+                    var highpassFilter = OnlineFilter.CreateHighpass(ImpulseResponse.Finite, audioOutputFormat.SamplesPerSec, 60);
+                    var lowpassFilter = OnlineFilter.CreateLowpass(ImpulseResponse.Finite, audioOutputFormat.SamplesPerSec, 10000);
+                    var denoiseFilter = OnlineFilter.CreateDenoise();
+                    audioSamples = audioSamples.Select(samples =>
+                    {
+                        var filtered = samples.Select(sample => (double)sample).ToArray();
+                        filtered = highpassFilter.ProcessSamples(filtered);
+                        filtered = lowpassFilter.ProcessSamples(filtered);
+                        filtered = denoiseFilter.ProcessSamples(filtered);
+                        return filtered.Select(sample => (float)sample).ToArray();
+                    });
+
+                    // Third, we mix the two audio streams by joining them using the NearestOrDefault interpolator with a symmetric relative time tolerance of half the duration of an reframed audio buffer.
                     // Using the "Nearest" interpolator is extremely important, as without it, psi looks at the whole stream to look for the nearest audio buffer and incurs a huge latency.
                     // Using the "NearestOrDefault" is also extremely important b/c we need to ignore audio buffers from the external microphone that do not line up closely to the HL2 audio buffers.
                     var outputAudioBufferDuration = TimeSpan.FromTicks(10000000L * reframeSize / audioOutputFormat.AvgBytesPerSec);
