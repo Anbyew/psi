@@ -68,6 +68,12 @@ namespace HoloLensCaptureExporter
             /// </summary>
             [Option("text-asr-name-instructor", Required = false, HelpText = "Name of the input Psi data store for (instructor) ASR annotations (default: anno_ext).")]
             public string StoreNameTextASRInstructor { get; set; } = "anno_ext";
+
+            /// <summary>
+            /// Gets or sets a value indicating whether to export Eye Gaze pixel values.
+            /// </summary>
+            [Option('e', "eye-gaze", Required = false, HelpText = "Whether to export Eye Gaze pixel values (default: false).")]
+            public bool EyeGaze { get; set; } = false;
         }
     }
 }

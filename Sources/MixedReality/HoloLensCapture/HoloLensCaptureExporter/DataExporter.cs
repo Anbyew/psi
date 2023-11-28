@@ -226,6 +226,22 @@ namespace HoloLensCaptureExporter
                     var eyes = store.OpenStreamOrDefault<WinRTEyes>("Eyes");
                     eyes?.Export("Eyes", exportCommand.OutputPath, streamWritersToClose);
                 }
+
+                if (exportCommand.EyeGaze)
+                {
+                    // var eyeGaze = eyes.Join(head).Select(data =>
+                    // {
+                    //    var eye = data.Item1;
+                    //    var head = data.Item2;
+                    //    return eye.GazeRay;
+                    // });
+                    // eyeGaze.Export("EyeGaze", exportCommand.OutputPath, streamWritersToClose);
+                    var eyes = store.OpenStreamOrDefault<WinRTEyes>("Eyes");
+                    eyes.Join(head, RelativeTimeInterval.Past()).Select(data =>
+                    {
+                        return new HoloLensCaptureExporter.EyeGazeData(false, 1.0, 3.0);
+                    }).Export("Eye Gaze Data", exportCommand.OutputPath, streamWritersToClose);
+                }
             }
 
             if (store.Contains("Hands"))

@@ -385,6 +385,25 @@ namespace HoloLensCaptureExporter
         }
 
         /// <summary>
+        /// Exports a stream of Eye Gaze Data.
+        /// </summary>
+        /// <param name="source">The source stream of EyeRT.</param>
+        /// <param name="name">The name for the source stream.</param>
+        /// <param name="outputPath">The output path.</param>
+        /// <param name="streamWritersToClose">The collection of stream writers to be closed.</param>
+        internal static void Export(this IProducer<HoloLensCaptureExporter.EyeGazeData> source, string name, string outputPath, List<StreamWriter> streamWritersToClose)
+        {
+            var filePath = DataExporter.EnsurePathExists(Path.Combine(outputPath, name, $"{name}.txt"));
+            var file = File.CreateText(filePath);
+            streamWritersToClose.Add(file);
+            source
+                .Do(data =>
+                    {
+                        file.Write($"{data.Valid.ToText()}\t{data.PixelX}\t{data.PixelY}\t\n");
+                    });
+        }
+
+        /// <summary>
         /// Exports a stream of hand infomation (from <see cref="StereoKitHandsSensor"/>).
         /// </summary>
         /// <param name="source">The source stream of hand information.</param>

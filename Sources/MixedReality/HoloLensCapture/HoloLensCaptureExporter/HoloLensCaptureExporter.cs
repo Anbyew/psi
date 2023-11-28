@@ -32,7 +32,7 @@ namespace HoloLensCaptureExporter
                             }
                             else
                             {
-                                return DataExporter.RunOnlyNeeded(command);
+                                return DataExporter.Run(command);
                             }
                         },
                         DisplayParseErrors);
@@ -63,6 +63,40 @@ namespace HoloLensCaptureExporter
             }
 
             return ret;
+        }
+
+        /// <summary>
+        /// EyeGazeData to be exported.
+        /// </summary>
+        internal class EyeGazeData
+        {
+            /// <summary>
+            /// Initializes a new instance of the <see cref="EyeGazeData"/> class.
+            /// </summary>
+            /// <param name="valid">The valid.</param>
+            /// <param name="pixelX">The pixel x.</param>
+            /// <param name="pixelY">The pixel y.</param>
+            public EyeGazeData(bool valid, double pixelX, double pixelY)
+            {
+                this.Valid = valid;
+                this.PixelX = pixelX;
+                this.PixelY = pixelY;
+            }
+
+            /// <summary>
+            /// Gets a value indicating whether this is a valid datapoint.
+            /// </summary>
+            public bool Valid { get; private set; }
+
+            /// <summary>
+            /// Gets a value indicating the pixel x coordinate.
+            /// </summary>
+            public double PixelX { get; private set; }
+
+            /// <summary>
+            /// Gets a value indicating the pixel y coordinate.
+            /// </summary>
+            public double PixelY { get; private set; }
         }
     }
 }
